@@ -1,0 +1,14 @@
+# Entornos virtuales (por si usas virtualenv como en la Práctica 1)
+venv/
+env/
+
+# Archivos compilados temporales de Python
+__pycache__/
+*.pyc
+
+# Archivos ocultos del sistema operativo
+.DS_Store
+Thumbs.db
+
+# Configuraciones locales de VS Code
+.vscode/
