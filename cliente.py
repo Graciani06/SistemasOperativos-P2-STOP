@@ -9,10 +9,10 @@ def main():
     s.connect(('127.0.0.1', 65432))
     
     # 3. SEND (pasoDeMensajes.pdf pág 3)
-    # Enviamos un mensaje al servidor. Recordamos usar .encode() 
-    # porque por la red solo viajan bytes, no texto normal.
-    mensaje = "¡Hola! Soy un jugador nuevo."
-    print("Enviando mensaje:", mensaje)
+    # Pedimos al usuario que escriba por teclado usando input()
+    mensaje = input("Escribe una palabra para la categoria Animal: ")
+    
+    print("Enviando mensaje: " + mensaje)
     s.send(mensaje.encode('utf-8'))
     
     # 4. RECEIVE BLOQUEANTE (pasoDeMensajes.pdf pág 4)
