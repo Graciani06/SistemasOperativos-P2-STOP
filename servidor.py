@@ -1,69 +1,100 @@
 import socket
-import threading  # Visto en hilos.pdf (pág 6)
-import tablero    # Importamos el archivo con el recurso compartido y semáforos
+import threading
+import tablero
+import random  # NUEVO: Para generar la letra aleatoria
 
-def atender_jugador(conexion, direccion, tablero_compartido):
-    """
-    Función que ejecutará cada hilo de forma independiente.
-    Equivale a la función 'ejecutar(c)' de la página 6 de hilos.pdf.
-    """
+def atender_jugador(conexion, direccion, tablero_compartido, clientes_conectados):
     print("Nuevo jugador conectado desde:", direccion)
-    
-    # Le asignaremos un nombre genérico basado en su puerto para identificarlo
     nombre_jugador = "Jugador-" + str(direccion[1])
     
-    # Bucle para que el servidor siga escuchando a este jugador en concreto
     while True:
-        # RECEIVE BLOQUEANTE (pasoDeMensajes.pdf pág 4)
-        # Este hilo se bloquea aquí hasta que este jugador envíe algo.
-        # Como es un hilo independiente, el servidor principal NO se bloquea.
         datos = conexion.recv(1024) 
-        
-        # Si recv devuelve vacío, significa que el cliente se ha desconectado
         if not datos:
             break
             
-        mensaje = datos.decode('utf-8')
+        mensaje = datos.decode('utf-8').strip()
         print(nombre_jugador + " dice: " + mensaje)
         
-        # INTERACCIÓN CON EL RECURSO COMPARTIDO (sincronizacion.pdf)
-        # Simulamos que el jugador intenta escribir en "Animal" lo recibido
-        tablero_compartido.escribir_en_categoria(nombre_jugador, "Animal", mensaje)
+        if mensaje == "GO!":
+            abecedario = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            letra = random.choice(abecedario)
+            
+            anuncio = "\n¡EL JUEGO COMIENZA! Letra elegida: " + letra + "\nTablero: " + str(tablero_compartido.categorias) + "\n"
+            print("Generando letra " + letra + " y avisando a todos...")
+            
+            # BROADCAST DE INICIO
+            for cliente in clientes_conectados:
+                cliente.send(anuncio.encode('utf-8'))
+                    
+        else:
+            # LÓGICA DE JUEGO NORMAL
+            partes = mensaje.split(",")
+            
+            if len(partes) == 2:
+                categoria = partes[0].strip()
+                palabra = partes[1].strip()
+                
+                if categoria in tablero_compartido.categorias:
+                    
+                    # ENTRAMOS A LA SECCIÓN CRÍTICA
+                    tablero_compartido.escribir_en_categoria(nombre_jugador, categoria, palabra)
+                    
+                    # BROADCAST DE ACTUALIZACIÓN
+                    aviso = "\n" + nombre_jugador + " ha escrito en " + categoria + "\nTablero: " + str(tablero_compartido.categorias) + "\n"
+                    for cliente in clientes_conectados:
+                        cliente.send(aviso.encode('utf-8'))
+                    
+                    # --- NUEVO: COMPROBAR FIN DE PARTIDA ---
+                    # Comprobamos si queda algún valor vacío ("") en el diccionario
+                    tablero_lleno = True
+                    for valor in tablero_compartido.categorias.values():
+                        if valor == "":
+                            tablero_lleno = False
+                    
+                    # Si ya no hay vacíos, el juego ha terminado
+                    if tablero_lleno:
+                        fin_msg = "\n¡EL TABLERO ESTÁ COMPLETO! Fin de la partida.\n"
+                        print("Partida terminada. Tablero lleno.")
+                        for cliente in clientes_conectados:
+                            cliente.send(fin_msg.encode('utf-8'))
+                            
+                        # Aquí, idealmente, se podría reiniciar el tablero para una nueva partida:
+                        # tablero_compartido.categorias = {"Marca": "", "Comida": "", "Lugar": "", "Animal": ""}
+                        
+                else:
+                    error = "Categoria no valida. Las categorias son: Marca, Comida, Lugar, Animal\n"
+                    conexion.send(error.encode('utf-8'))
+            else:
+                error = "Formato incorrecto. Debes usar la coma: Categoria,Palabra\n"
+                conexion.send(error.encode('utf-8'))
         
-        # SEND (pasoDeMensajes.pdf pág 3)
-        # Enviamos el estado actual del tablero al jugador para que lo vea
-        respuesta = "Tablero actualizado: " + str(tablero_compartido.categorias)
-        conexion.send(respuesta.encode('utf-8'))
-        
+    clientes_conectados.remove(conexion)
     conexion.close()
     print("Jugador desconectado:", direccion)
 
+
 def main():
-    # 1. Creamos el "Buzón" (pasoDeMensajes.pdf pág 5) usando Sockets
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    
-    # Anclamos el buzón a nuestra IP y puerto para que los clientes nos encuentren
     s.bind(('127.0.0.1', 65432))
-    s.listen(5) # Permite encolar hasta 5 peticiones de conexión simultáneas
+    s.listen(5)
     
-    # 2. CREAMOS EL RECURSO COMPARTIDO
-    # Se crea una sola vez antes del bucle infinito (hilos.pdf pág 7 - compartir memoria)
     mi_tablero = tablero.TableroJuego()
+    
+    # NUEVO: Lista compartida en memoria principal para guardar los sockets
+    lista_clientes = []
     
     print("Servidor STOP! iniciado y esperando jugadores...")
     
-    # 3. Bucle infinito del hilo principal (receptor de peticiones)
     while True:
-        # El hilo principal se bloquea aquí esperando a que alguien se conecte
         conexion, direccion = s.accept()
         
-        # DISEÑO BAJO DEMANDA (hilos.pdf pág 2)
-        # "Al llegar una petición crea un proceso/hilo para atender dicha petición"
-        # Le pasamos el 'mi_tablero' como argumento al nuevo hilo para compartir la memoria
-        hilo = threading.Thread(target=atender_jugador, args=(conexion, direccion, mi_tablero))
+        # NUEVO: Guardamos el socket del nuevo jugador en la lista
+        lista_clientes.append(conexion)
+        
+        # NUEVO: Pasamos la lista_clientes al hilo también
+        hilo = threading.Thread(target=atender_jugador, args=(conexion, direccion, mi_tablero, lista_clientes))
         hilo.start()
         
-        # Print equivalente al de hilos.pdf para ver que el hilo principal sigue libre
         print("Hilo principal libre. Hilos activos actualmente: " + str(threading.active_count()))
 
 if __name__ == '__main__':
