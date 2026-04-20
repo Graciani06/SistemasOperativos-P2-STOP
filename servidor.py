@@ -1,11 +1,22 @@
 import socket
 import threading
 import tablero
-import random  # NUEVO: Para generar la letra aleatoria
+import random
 
 def atender_jugador(conexion, direccion, tablero_compartido, clientes_conectados):
     print("Nuevo jugador conectado desde:", direccion)
     nombre_jugador = "Jugador-" + str(direccion[1])
+    
+    # 1. Guardamos al jugador en nuestro Diccionario compartido
+    # La clave es la conexión, el valor es su nombre
+    clientes_conectados[conexion] = nombre_jugador
+    
+    # --- MENSAJE DE BIENVENIDA INTELIGENTE ---
+    if tablero_compartido.letra_actual == "":
+        bienvenida = "\nBienvenido. No hay partida en curso. Escribe 'GO!' para empezar.\n"
+    else:
+        bienvenida = "\nBienvenido. Partida en curso con la letra: " + tablero_compartido.letra_actual + "\nEscribe 'Categoria,Palabra' para jugar.\n"
+    conexion.send(bienvenida.encode('utf-8'))
     
     while True:
         datos = conexion.recv(1024) 
@@ -13,89 +24,100 @@ def atender_jugador(conexion, direccion, tablero_compartido, clientes_conectados
             break
             
         mensaje = datos.decode('utf-8').strip()
-        print(nombre_jugador + " dice: " + mensaje)
         
-        if mensaje == "GO!":
+        # 2. EXTRAEMOS LA INFORMACIÓN DE LOS JUGADORES
+        # Sacamos todos los nombres del diccionario y los unimos con comas
+        nombres_activos = ", ".join(clientes_conectados.values())
+        total_jugadores = str(len(clientes_conectados))
+        
+        # Creamos una cabecera que se enviará en cada actualización
+        info_jugadores = "\n👥 [Jugadores activos (" + total_jugadores + "): " + nombres_activos + "]"
+        
+        # Tolerancia a errores: Aceptamos "GO!" y "GO"
+        if mensaje == "GO!" or mensaje == "GO":
             abecedario = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
             letra = random.choice(abecedario)
             
-            anuncio = "\n¡EL JUEGO COMIENZA! Letra elegida: " + letra + "\nTablero: " + str(tablero_compartido.categorias) + "\n"
-            print("Generando letra " + letra + " y avisando a todos...")
+            tablero_compartido.letra_actual = letra
+            for cat in tablero_compartido.categorias:
+                tablero_compartido.categorias[cat] = ""
+
+            # Añadimos la cabecera de jugadores al anuncio
+            anuncio = info_jugadores + "\n¡NUEVA PARTIDA! Letra elegida: " + letra + "\nEl tablero se ha vaciado.\n"
             
-            # BROADCAST DE INICIO
-            for cliente in clientes_conectados:
-                cliente.send(anuncio.encode('utf-8'))
+            # Para enviar a todos, iteramos sobre las claves (las conexiones) del diccionario
+            for c in clientes_conectados.keys():
+                c.send(anuncio.encode('utf-8'))
                     
         else:
-            # LÓGICA DE JUEGO NORMAL
             partes = mensaje.split(",")
-            
             if len(partes) == 2:
                 categoria = partes[0].strip()
                 palabra = partes[1].strip()
                 
                 if categoria in tablero_compartido.categorias:
-                    
-                    # ENTRAMOS A LA SECCIÓN CRÍTICA
-                    tablero_compartido.escribir_en_categoria(nombre_jugador, categoria, palabra)
-                    
-                    # BROADCAST DE ACTUALIZACIÓN
-                    aviso = "\n" + nombre_jugador + " ha escrito en " + categoria + "\nTablero: " + str(tablero_compartido.categorias) + "\n"
-                    for cliente in clientes_conectados:
-                        cliente.send(aviso.encode('utf-8'))
-                    
-                    # --- NUEVO: COMPROBAR FIN DE PARTIDA ---
-                    # Comprobamos si queda algún valor vacío ("") en el diccionario
-                    tablero_lleno = True
-                    for valor in tablero_compartido.categorias.values():
-                        if valor == "":
-                            tablero_lleno = False
-                    
-                    # Si ya no hay vacíos, el juego ha terminado
-                    if tablero_lleno:
-                        fin_msg = "\n¡EL TABLERO ESTÁ COMPLETO! Fin de la partida.\n"
-                        print("Partida terminada. Tablero lleno.")
-                        for cliente in clientes_conectados:
-                            cliente.send(fin_msg.encode('utf-8'))
-                            
-                        # Aquí, idealmente, se podría reiniciar el tablero para una nueva partida:
-                        # tablero_compartido.categorias = {"Marca": "", "Comida": "", "Lugar": "", "Animal": ""}
+                    if palabra[0].upper() == tablero_compartido.letra_actual:
                         
+                        tablero_compartido.escribir_en_categoria(nombre_jugador, categoria, palabra)
+                        
+                        # Añadimos la cabecera de jugadores a la actualización del tablero
+                        aviso = info_jugadores + "\n" + nombre_jugador + " escribio " + palabra + " en " + categoria + "\nTablero: " + str(tablero_compartido.categorias) + "\n"
+                        for c in clientes_conectados.keys():
+                            c.send(aviso.encode('utf-8'))
+                        
+                        lleno = True
+                        for v in tablero_compartido.categorias.values():
+                            if v == "": lleno = False
+                        
+                        # ... (dentro de comprobar si está lleno) ...
+                        if lleno:
+                            # 1. Calculamos la puntuación máxima
+                            max_puntos = max(tablero_compartido.puntuaciones.values())
+                            
+                            # 2. Buscamos quién o quiénes tienen esa puntuación (por si hay empate)
+                            ganadores = []
+                            for nombre, puntos in tablero_compartido.puntuaciones.items():
+                                if puntos == max_puntos:
+                                    ganadores.append(nombre)
+                            
+                            # 3. Preparamos el mensaje final
+                            resultado = "\n--- PARTIDA TERMINADA ---"
+                            resultado += "\nPuntuaciones: " + str(tablero_compartido.puntuaciones)
+                            
+                            if len(ganadores) > 1:
+                                resultado += "\n¡EMPATE entre: " + ", ".join(ganadores) + "!"
+                            else:
+                                resultado += "\n¡GANADOR: " + ganadores[0] + "!"
+                            
+                            for c in clientes_conectados.keys():
+                                c.send(resultado.encode('utf-8'))
+                    else:
+                        error = "ERROR: La palabra debe empezar por " + tablero_compartido.letra_actual + "\n"
+                        conexion.send(error.encode('utf-8'))
                 else:
-                    error = "Categoria no valida. Las categorias son: Marca, Comida, Lugar, Animal\n"
-                    conexion.send(error.encode('utf-8'))
+                    conexion.send("Categoria inexistente.\n".encode('utf-8'))
             else:
-                error = "Formato incorrecto. Debes usar la coma: Categoria,Palabra\n"
-                conexion.send(error.encode('utf-8'))
+                conexion.send("Formato: Categoria,Palabra\n".encode('utf-8'))
         
-    clientes_conectados.remove(conexion)
+    # 3. Cuando un jugador se va, lo borramos del diccionario
+    del clientes_conectados[conexion]
     conexion.close()
-    print("Jugador desconectado:", direccion)
-
 
 def main():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(('127.0.0.1', 65432))
     s.listen(5)
-    
     mi_tablero = tablero.TableroJuego()
     
-    # NUEVO: Lista compartida en memoria principal para guardar los sockets
-    lista_clientes = []
+    # NUEVO: Usamos un diccionario {} en vez de una lista []
+    dict_clientes = {}
     
-    print("Servidor STOP! iniciado y esperando jugadores...")
-    
+    print("Servidor iniciado...")
     while True:
         conexion, direccion = s.accept()
-        
-        # NUEVO: Guardamos el socket del nuevo jugador en la lista
-        lista_clientes.append(conexion)
-        
-        # NUEVO: Pasamos la lista_clientes al hilo también
-        hilo = threading.Thread(target=atender_jugador, args=(conexion, direccion, mi_tablero, lista_clientes))
+        # Pasamos el diccionario a los hilos para que compartan esta memoria
+        hilo = threading.Thread(target=atender_jugador, args=(conexion, direccion, mi_tablero, dict_clientes))
         hilo.start()
-        
-        print("Hilo principal libre. Hilos activos actualmente: " + str(threading.active_count()))
 
 if __name__ == '__main__':
     main()

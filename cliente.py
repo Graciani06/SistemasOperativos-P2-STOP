@@ -35,8 +35,7 @@ def main():
     hilo_escucha.start()
     
     # 2. BUCLE DEL HILO PRINCIPAL (EMISOR)
-    print("¡Conectado! Escribe 'GO!' para empezar, o 'Categoria,Palabra' para jugar.")
-    print("Escribe 'SALIR' para desconectarte.")
+    
     
     while True:
         # El programa principal se queda bloqueado aquí esperando tu teclado
