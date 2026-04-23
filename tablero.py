@@ -1,28 +1,30 @@
-def __init__(self):
-        # ... (tus categorías y semáforos) ...
+import threading
+import time
+
+class TableroJuego:
+    def __init__(self):
+        # Recurso compartido: categorías
         self.categorias = {"Marca": "", "Comida": "", "Lugar": "", "Animal": ""}
         self.letra_actual = ""
-        
-        # NUEVO: Diccionario para llevar la cuenta de puntos de cada nombre
         self.puntuaciones = {}
         
-        # ... (tus semáforos) ...
+        # Semáforos (Mutex) para exclusión mutua (semafors2.pdf)
+        self.semaforos = {cat: threading.Semaphore(1) for cat in self.categorias}
 
     def escribir_en_categoria(self, nombre_jugador, categoria, palabra):
-        # Nos aseguramos de que el jugador esté en el diccionario de puntos
         if nombre_jugador not in self.puntuaciones:
             self.puntuaciones[nombre_jugador] = 0
 
+        # WAIT (P) - Bloqueamos la categoría
         self.semaforos[categoria].acquire()
+        exito = False
         
-        # SECCIÓN CRÍTICA
         if self.categorias[categoria] == "":
-            time.sleep(5) 
+            time.sleep(5) # Simulación de tiempo de escritura (Sección Crítica)
             self.categorias[categoria] = palabra
-            # NUEVO: Sumamos un punto al jugador que ha ganado la posición
             self.puntuaciones[nombre_jugador] += 1
-            print("[" + nombre_jugador + "] +1 punto por " + categoria)
-        else:
-            print("[" + nombre_jugador + "] llegó tarde.")
-            
+            exito = True
+        
+        # SIGNAL (V) - Liberamos
         self.semaforos[categoria].release()
+        return exito
