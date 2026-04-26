@@ -1,12 +1,24 @@
 from bottle import route, run, default_app
 import multiprocessing
 import servidor
-import random
+import socket
+
+try:
+    multiprocessing.set_start_method('spawn')
+except RuntimeError:
+    pass
+
+def obtener_puerto_libre():
+    #lE pedimos al Sistema Operativo que nos de un puerto libre
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(('', 0))
+    puerto = s.getsockname()[1]
+    s.close()
+    return puerto
 
 @route('/stop/new')
 def nueva_partida():
-    # Asignamos un puerto aleatorio para la partida 
-    puerto = random.randint(8000, 9000)
+    puerto = obtener_puerto_libre()
     
     p = multiprocessing.Process(target=servidor.iniciar_partida, args=(puerto,))
     p.start()
