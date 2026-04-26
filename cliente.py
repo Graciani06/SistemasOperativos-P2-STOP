@@ -50,7 +50,7 @@ def main():
         
         s.send(msg.encode('utf-8'))
         
-    # Cuando salimos del bucle (al escribir SALIR), cerramos la conexion
+    #Cuando salimos del bucle (escribiendo SALIR), cerramos la conexion
     s.close()
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ def prueba_estres(num_partidas):
     print(f"Iniciando prueba de estrés: Creando {num_partidas} partidas simultáneas...")
     exitos = 0
     
-    # Uso mi ip de azure actual
+    # Uso mi ip de azure actual, hay que cambiarla cada vez que inicie si cambia
     ip_azure = "158.158.34.25" 
     url = f"http://{ip_azure}:8080/stop/new"
 

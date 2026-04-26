@@ -18,7 +18,7 @@ def reloj_inactividad(limite, estado, clientes):
                 print("Limite de tiempo alcanzqdo", flush=True)
                 aviso = "\nPartida cerrada por inactividad.\n"
                 
-                # Avisamos a todos y cerramos sus conexiones
+                #Avisamos a todos y cerramos sus conexiones
                 for c in list(clientes.keys()):
                     c.send(aviso.encode('utf-8'))
                     c.close()
@@ -33,7 +33,7 @@ def atender_jugador(conexion, direccion, tablero, clientes, estado):
     bienvenida = f"\nHola {nombre}. Las categorias son estas: {cats}. Escribe 'GO!' para empezar.\n"
     conexion.send(bienvenida.encode('utf-8'))
 
-    # Bucle  del jugador
+    #Bucle  del jugador
     while True:
         datos = conexion.recv(1024)
         
@@ -75,9 +75,29 @@ def atender_jugador(conexion, direccion, tablero, clientes, estado):
                         
                         # Si no quedan categorias vacias, la partida acaba
                         if all(valor != "" for valor in tablero.categorias.values()):
+                            mensaje_final = "\n--- TABLERO COMPLETADO ---\n"
+                            mensaje_final += f"Puntuaciones: {tablero.puntuaciones}\n"
+                            
+                            # Calculamos quien tiene mas puntos
+                            ganador = ""
+                            max_puntos = -1
+                            for jug, pts in tablero.puntuaciones.items():
+                                if pts > max_puntos:
+                                    max_puntos = pts
+                                    ganador = jug
+                                    
+                            mensaje_final += f"¡EL GANADOR ES {ganador} CON {max_puntos} PUNTOS! ENHORABUENA :))\n\n"
+                            
+                            #Se lo enviamos a todos los conectados
+                            for c in clientes: 
+                                c.send(mensaje_final.encode('utf-8'))
+                                
+                            #Dormimos el proceso medio segundo para asegurarnos de que a los clientes les da tiempo a recibir el texto por red
+                            time.sleep(0.5) 
+                            
                             os._exit(0) 
                             
-    # Si llegamos hasta aquies por que el bucle while se ha roto
+    #Si llegamos hasta aquies por que el bucle while se ha roto
     # porque el jugador se ha ido. Procedemos a limpiar:
     if conexion in clientes:
         del clientes[conexion]
