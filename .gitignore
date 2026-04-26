@@ -1,4 +1,4 @@
-# Entornos virtuales (por si usas virtualenv como en la Práctica 1)
+# Entornos virtuales
 venv/
 env/
 

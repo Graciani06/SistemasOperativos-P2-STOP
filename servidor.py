@@ -1,73 +1,103 @@
 import socket
 import threading
 import random
+import os
 import tablero
+import time
 
-def atender_jugador(conexion, direccion, tablero_compartido, clientes_conectados):
-    # Recibimos el nombre (Primer mensaje del protocolo)
-    try:
-        nombre = conexion.recv(1024).decode('utf-8').strip()
-        clientes_conectados[conexion] = nombre
+def reloj_inactividad(limite, estado, clientes):
+    while True:
+        time.sleep(1) 
         
-        cats = ", ".join(tablero_compartido.categorias.keys())
-        bienvenida = f"\nBienvenido {nombre}. Categorias: {cats}. Esperando 'GO!'...\n"
-        conexion.send(bienvenida.encode('utf-8'))
-
-        while True:
-            datos = conexion.recv(1024)
-            if not datos: break
-            msg = datos.decode('utf-8').strip()
-
-            if msg.upper() == "GO!":
-                letra = random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-                tablero_compartido.letra_actual = letra
-                for c in tablero_compartido.categorias: tablero_compartido.categorias[c] = ""
-                
-                anuncio = f"\n¡NUEVA PARTIDA! Letra: {letra}\n"
-                for c in clientes_conectados: c.send(anuncio.encode('utf-8'))
+        if estado['iniciada']:
+            inactividad = time.time() - estado['ultimo_tiempo']
             
-            elif "," in msg:
-                cat, palabra = [x.strip() for x in msg.split(",")]
-                if cat in tablero_compartido.categorias and palabra[0].upper() == tablero_compartido.letra_actual:
-                    if tablero_compartido.escribir_en_categoria(nombre, cat, palabra):
-                        # 1. Broadcast del acierto
-                        aviso = f"\n{nombre} escribio {palabra} en {cat}.\nTablero: {tablero_compartido.categorias}\n"
-                        for c in clientes_conectados: c.send(aviso.encode('utf-8'))
+            print(f"Tiempo inactivo: {int(inactividad)}s / {limite}s", flush=True)
+            
+            if inactividad > limite:
+                print("Limite de tiempo alcanzqdo", flush=True)
+                aviso = "\nPartida cerrada por inactividad.\n"
+                
+                # Avisamos a todos y cerramos sus conexiones
+                for c in list(clientes.keys()):
+                    c.send(aviso.encode('utf-8'))
+                    c.close()
+                
+                os._exit(0)
+
+def atender_jugador(conexion, direccion, tablero, clientes, estado):
+    nombre = conexion.recv(1024).decode('utf-8').strip()
+    clientes[conexion] = nombre
+    
+    cats = ", ".join(tablero.categorias.keys())
+    bienvenida = f"\nHola {nombre}. Las categorias son estas: {cats}. Escribe 'GO!' para empezar.\n"
+    conexion.send(bienvenida.encode('utf-8'))
+
+    # Bucle  del jugador
+    while True:
+        datos = conexion.recv(1024)
+        
+        # Si el cliente se desconecta, recv devuelve vacio y rompemos el bucle
+        if not datos: 
+            break 
+        
+        msg = datos.decode('utf-8').strip()
+
+        if msg != "":
+            estado['ultimo_tiempo'] = time.time()
+
+        # Solo iniciamos si no ha empezado ya
+        if msg.upper() == "GO!" and not estado['iniciada']:
+            estado['iniciada'] = True
+            estado['ultimo_tiempo'] = time.time()
+            
+            letra = random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+            tablero.letra_actual = letra
+            
+            for c in tablero.categorias: 
+                tablero.categorias[c] = ""
+            
+            anuncio = f"\n[NUEVA PARTIDA] Letra elegida: {letra}. Suerte a todos:)\n"
+            for c in clientes: 
+                c.send(anuncio.encode('utf-8'))
+        
+        elif "," in msg:
+            partes = msg.split(",")
+            if len(partes) >= 2:
+                cat = partes[0].strip()
+                palabra = partes[1].strip()
+                
+                if cat in tablero.categorias and palabra[0].upper() == tablero.letra_actual:
+                    if tablero.escribir_en_categoria(nombre, cat, palabra):
+                        aviso = f"\n{nombre} ha completado {cat} con '{palabra}'.\nEstado actual: {tablero.categorias}\n"
+                        for c in clientes: 
+                            c.send(aviso.encode('utf-8'))
                         
-                        # 2. NUEVO: Comprobar si el tablero se ha completado
-                        lleno = all(valor != "" for valor in tablero_compartido.categorias.values())
-                        
-                        if lleno:
-                            # Calculamos ganador
-                            max_puntos = max(tablero_compartido.puntuaciones.values())
-                            ganadores = [n for n, p in tablero_compartido.puntuaciones.items() if p == max_puntos]
+                        # Si no quedan categorias vacias, la partida acaba
+                        if all(valor != "" for valor in tablero.categorias.values()):
+                            os._exit(0) 
                             
-                            resultado = f"\n--- PARTIDA TERMINADA ---\nPuntos: {tablero_compartido.puntuaciones}"
-                            resultado += f"\nGANADOR: {', '.join(ganadores)}!\n"
-                            
-                            for c in clientes_conectados:
-                                c.send(resultado.encode('utf-8'))
-                                # El PDF dice "el socket se libera", podemos cerrar aquí o esperar a que salgan
-                    else:
-                        conexion.send(f"ERROR: {cat} ya esta ocupada.\n".encode('utf-8'))
-                else:
-                    conexion.send("ERROR: Letra o categoria incorrecta.\n".encode('utf-8'))
-    except: pass
-    finally:
-        if conexion in clientes_conectados: del clientes_conectados[conexion]
-        conexion.close()
+    # Si llegamos hasta aquies por que el bucle while se ha roto
+    # porque el jugador se ha ido. Procedemos a limpiar:
+    if conexion in clientes:
+        del clientes[conexion]
+    conexion.close()
 
 def iniciar_partida(puerto):
-    # Esta función se ejecuta en un PROCESO separado (multiprocessing)
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(('0.0.0.0', puerto))
     s.listen(10)
     
-    mi_tablero = tablero.TableroJuego()
-    dict_clientes = {} # Memoria compartida entre HILOS de este PROCESO
+    juego = tablero.TableroJuego()
+    clientes_conectados = {} 
+    estado_partida = {'iniciada': False, 'ultimo_tiempo': time.time()}
+
+    hilo_reloj = threading.Thread(target=reloj_inactividad, args=(30, estado_partida, clientes_conectados), daemon=True)
+    hilo_reloj.start()
+
+    print(f"Servidor escuchando en puerto {puerto}", flush=True)
     
-    print(f"Partida iniciada en puerto {puerto}")
     while True:
         conn, addr = s.accept()
-        # Creamos HILO bajo demanda (hilos.pdf)
-        threading.Thread(target=atender_jugador, args=(conn, addr, mi_tablero, dict_clientes)).start()
+        hilo_jugador = threading.Thread(target=atender_jugador, args=(conn, addr, juego, clientes_conectados, estado_partida))
+        hilo_jugador.start()
